@@ -1,0 +1,128 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Parameters:
+  AMI:
+    Type: String
+    Default: ami-1a83cd66
+  EC2Key:
+    Type: String
+    Default: srp-dev
+  StackTTL:
+    Type: String
+    Default: 1
+  BucketName:
+    Type: String
+    MinLength: 1
+  TestCaseDir:
+    Type: String
+    MinLength: 1
+  JMeterLog:
+    Type: String
+    Default: ./run.log
+  JMeterOutputDir:
+    Type: String
+    Default: output/
+  InstanceType:
+    Type: String
+    Default: t2.micro
+Resources:
+  WebRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Principal:
+            Service:
+            - ec2.amazonaws.com
+          Action: sts:AssumeRole
+  WebRolePolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: WebRolePolicy
+      Roles:
+      - Ref: WebRole
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Effect: Allow
+          Action:
+          - cloudwatch:*
+          Resource:
+          - "*"
+        - Effect: Allow
+          Action:
+          - ec2:*
+          Resource:
+          - "*"
+        - Effect: Allow
+          Action:
+          - cloudformation:*
+          Resource:
+          - "*"
+        - Effect: Allow
+          Action: s3:*
+          Resource: 
+          - "*"
+  JMeterInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      #InstanceProfileName: !Join [ '-', ['JMeterInstanceProfile', '${AWS:StackName}'] ]
+      InstanceProfileName: 'JMeterInstanceProfile'
+      Path: "/"
+      Roles:
+      - Ref: WebRole
+  JMeterSG:
+    Type: "AWS::EC2::SecurityGroup"
+    Properties:
+      GroupDescription: "Enable JMeter Security Group"
+      Tags:
+      - Key: 'Name'
+        Value: 'QA-Jmeter-SG'
+      SecurityGroupIngress:
+      - IpProtocol: 'tcp'
+        FromPort: '22'
+        ToPort: '22'
+        CidrIp: '0.0.0.0/0'
+  JMeterMaster:
+    DependsOn: ['JMeterSG'] 
+    Type: "AWS::EC2::Instance"
+    Metadata:
+      AWS::CloudFormation::Init:
+        config:
+          files:
+            /home/ubuntu/jmeter.properties:
+              content: |
+                client.rmi.localport=1099
+              mode: "000644"
+              owner: "ubuntu"
+              group: "ubuntu"
+    Properties:
+      IamInstanceProfile: !Ref 'JMeterInstanceProfile'
+      SecurityGroupIds:
+      - !Ref 'JMeterSG'
+      ImageId: !Ref 'AMI'
+      InstanceType: !Ref 'InstanceType'
+      KeyName: !Ref 'EC2Key'
+      Tags:
+      - Key: 'Name'
+        Value: 'QA-Jmeter'
+      UserData:
+        Fn::Base64:
+          !Sub |
+            #!/bin/bash -xe
+            aws cloudformation delete-stack --stack-name ${AWS::StackName} | at now + ${StackTTL} hours
+            su - ubuntu
+            cd /home/ubuntu/
+            aws s3 sync s3://${BucketName} ${BucketName}
+            cd ${BucketName}
+            . utils.sh
+            export JMETER_LOG=${JMeterLog}
+            export OUTPUT_DIR=${JMeterOutputDir}
+            chmod a+x ./jmeter-exec.sh && ./jmeter-exec.sh
+            remove_bucket_content ${BucketName}
+            local_to_bucket ${JMeterOutputDir} ${BucketName}
+Outputs:
+  EC2IP:
+    Description: EC2 IP
+    Value: !GetAtt JMeterMaster.PublicIp
