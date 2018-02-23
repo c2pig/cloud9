@@ -2,7 +2,7 @@
 
 ### How-To Run
 1. Create an empty folder, put your .jmx into that folder 
-2. run `./create-stack.sh <stack-name> <path-to-folder>
+2. run `./create-stack.sh <stack-name> <jmx-path>
 3. Check s3 URL produce by script above.  When your performance tesing finish the execution, dashboard report will display in s3 URL
 
 ### How-To Build AMI
