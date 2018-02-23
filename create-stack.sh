@@ -1,25 +1,27 @@
 #!/bin/sh
 
 [ $# -ne 2 ] && {
-  echo "Usage: $0 <stack-name> <test-case-dir>"
+  echo "Usage: $0 <stack-name> <jmeter-jmx-path>"
   exit 1;
 }
 
 stack_name=${1:-"performance-test"}
-report_bucket=`basename ${2:-"jmeter-dir"}-date +%Y%m%d-%M%S`
-test_case_dir=${2:-"jmeter-dir"}
+jmx_path=$2
+test_case_dir=`dirname $jmx_path`
+report_bucket=`basename ${test_case_dir}`-`date +%Y%m%d-%M%S`
 
 region=ap-southast-1
 
-test_file=${test_case_dir}/jmeter.jmx
 
-[ ! -e $test_file ] && {
-  echo "$test_file does not exist"
+[ ! -e $jmx_path ] && {
+  echo "$jmx_path does not exist"
   exit 2;
 }
 
-cp -r utils/* $test_case_dir
-
+tmp_dir=.tmp
+mkdir -p $tmp_dir
+cp $jmx_path $tmp_dir/jmeter.jmx
+cp -r utils/* $tmp_dir
 . utils/utils.sh
 
 ## if s3 bucket exist, ignore the creation error
@@ -28,9 +30,9 @@ websify_bucket ${report_bucket}
 
 ## upload local works to s3
 echo upload ${test_case_dir} to s3 bucket - ${report_bucket}
-local_to_bucket ${test_case_dir} ${report_bucket}
+local_to_bucket ${tmp_dir} ${report_bucket}
 
-rm ${test_case_dir}/*.sh && rm ${test_case_dir}/*.html
+rm -rf $tmp_dir
 
 aws cloudformation create-stack --stack-name $stack_name \
   --template-body file://performance-test.yml \
@@ -38,7 +40,7 @@ aws cloudformation create-stack --stack-name $stack_name \
   --region ap-southeast-1 \
   --parameters ParameterKey=BucketName,ParameterValue=$report_bucket \
     ParameterKey=TestCaseDir,ParameterValue=$test_case_dir \
-    ParameterKey=InstanceType,ParameterValue=t2.medium 
+    ParameterKey=InstanceType,ParameterValue=t2.medium
 
 aws cloudformation wait stack-create-complete --stack-name ${stack_name}
 echo Get report from : http://${report_bucket}.s3-website-us-east-1.amazonaws.com
